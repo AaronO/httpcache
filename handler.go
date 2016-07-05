@@ -56,7 +56,7 @@ func NewHandler(cache Cache, upstream http.Handler) *Handler {
 		upstream:  upstream,
 		cache:     cache,
 		validator: &Validator{upstream},
-		Shared:    false,
+		Shared:    true,
 	}
 }
 
@@ -166,6 +166,16 @@ func (h *Handler) freshness(res *Resource, r *cacheRequest) (time.Duration, erro
 func (h *Handler) needsValidation(res *Resource, r *cacheRequest) bool {
 	if res.MustValidate(h.Shared) {
 		return true
+	}
+
+	// Same etags
+	cachedEtag := res.Header().Get("ETag")
+	reqEtag := r.Header.Get("If-None-Match")
+	debugf("comparing etags '%s' to %s", reqEtag, cachedEtag)
+	if etagsEqual(cachedEtag, reqEtag) {
+		return false
+	} else {
+		debugf("ETags did not match: %+v", r.Header)
 	}
 
 	freshness, err := h.freshness(res, r)
@@ -510,15 +520,19 @@ func (r *cacheRequest) isCacheable() bool {
 		return false
 	}
 
-	if maxAge, ok := r.CacheControl.Get("max-age"); ok && maxAge == "0" {
-		return false
-	}
-
 	if r.CacheControl.Has("no-store") || r.CacheControl.Has("no-cache") {
 		return false
 	}
 
 	return true
+}
+
+func etagsEqual(e1, e2 string) bool {
+	// Too short
+	if len(e1) < 2 || len(e2) < 2 {
+		return false
+	}
+	return (e1 == e2) || (e1[2:] == e2) || (e1 == e2[2:])
 }
 
 func newResponseStreamer(w http.ResponseWriter) *responseStreamer {
